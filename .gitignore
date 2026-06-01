@@ -7,10 +7,17 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+
+backend/node_modules
+backend/.env
 node_modules
 dist
 dist-ssr
+.env
 *.local
+backend/certificados/**/*.key
+backend/certificados/**/*.crt
+backend/certificados/**/*.csr
 
 # Editor directories and files
 .vscode/*
