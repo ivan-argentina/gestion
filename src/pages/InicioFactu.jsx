@@ -425,6 +425,39 @@ export default function InicioFactu() {
               </ListItemButton>
             </List>
           </Collapse>
+          {/* Reportes */}
+          <ListItemButton
+            onClick={() => setOpenReportes(!openReportes)}
+            sx={{
+              color: "white",
+              mt: 1,
+              position: "relative",
+            }}
+          >
+            <ListItemText primary="Reportes" />
+            {openReportes ? <ExpandLess /> : <ExpandMore />}
+          </ListItemButton>
+          <Collapse in={openReportes} timeout="auto" unmountOnExit>
+            <List component="div" disablePadding>
+              <ListItemButton
+                component={Link}
+                to="/facturas"
+                selected={location.pathname === "/facturas"}
+                sx={{
+                  pl: 4,
+                  color: "white",
+                  "&:hover": {
+                    backgroundColor: "#1565c0",
+                  },
+                  "&.Mui-selected": {
+                    backgroundColor: "#0d47a1",
+                  },
+                }}
+              >
+                <ListItemText primary="Facturas" />
+              </ListItemButton>
+            </List>
+          </Collapse>
         </List>
         <Box
           sx={{

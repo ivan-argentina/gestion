@@ -1,6 +1,7 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, forwardRef } from "react";
 import { supabase } from "../hook/supabaseClient";
 import { obtenerEmpresa } from "../utils/obtenerEmpresa";
+import QRCode from "qrcode";
 
 import {
   Grid,
@@ -50,6 +51,7 @@ export default function Factura() {
   const [letraComprobante, setLetraComprobante] = useState("");
   const [empresa, setEmpresa] = useState(null);
   const [pdfData, setPdfData] = useState(null);
+  const [generarPdfPendiente, setGenerarPdfPendiente] = useState(false);
   const [condicionIva, setCondicionIva] = useState("");
   const [ciudad, setCiudad] = useState("");
 
@@ -65,14 +67,60 @@ export default function Factura() {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        idFactura: 116,
+        idFactura: 124,
       }),
     });
 
     const data = await response.json();
 
-    console.log("Respuesta:", data);
+    if (!data.ok) {
+      alert(data.mensaje || data.error || "Error al autorizar factura");
+      return;
+    }
+
+    const datosPdf = {
+      empresa: data.factura.empresas,
+      numeroFactura: data.afip.numeroFiscal,
+      fecha: data.factura.fecha,
+      tipoComprobante: data.factura.tipo_comprobante,
+      letraComprobante: "C",
+      formaPago: data.factura.forma_pago,
+      clienteSeleccionado: data.factura.clientes,
+      detalle: data.factura.detalle_factura || [],
+      totalFactura: data.factura.total,
+      observaciones: data.factura.observaciones,
+      puntoVenta: data.afip.puntoVenta,
+      cae: data.afip.cae,
+      vencimientoCae: data.afip.caeVto,
+    };
+
+    setPdfData(datosPdf);
+    setGenerarPdfPendiente(true);
   };
+
+  useEffect(() => {
+    if (!generarPdfPendiente || !pdfData) return;
+
+    const timer = setTimeout(() => {
+      console.log("REF PDF:", facturaPdfRef.current);
+
+      if (!facturaPdfRef.current) {
+        console.log("Todavía no está listo el PDF");
+        return;
+      }
+
+      generarpdfU(
+        facturaPdfRef.current,
+        `factura-C-${String(pdfData.puntoVenta).padStart(4, "0")}-${String(
+          pdfData.numeroFactura,
+        ).padStart(8, "0")}.pdf`,
+      );
+
+      setGenerarPdfPendiente(false);
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, [generarPdfPendiente, pdfData]);
 
   const obtenerLetraComprobante = (tipoComprobante, clienteSeleccionado) => {
     const tipo = tipoComprobante || "factura";
@@ -149,17 +197,21 @@ export default function Factura() {
       .from("clientes")
       .select(
         `
-         id,
-         nombre,
-         direccion,
-         cuit,
-         telefono,
-         ciudades (
-         id,
-         nombre),
-         condicion_iva(id,
-         descripcion)   
-        `,
+    id,
+    nombre,
+    direccion,
+    cuit,
+    telefono,
+    idciudad,
+    ciudades:fk_clientes_ciudad(
+      id,
+      nombre
+    ),
+    condicion_iva:fk_clientes_civa(
+      id,
+      descripcion
+    )
+    `,
       )
       .eq("idempresa", idEmpresa)
       .order("nombre");
@@ -271,7 +323,6 @@ export default function Factura() {
       .single();
 
     const numeroRemito = empresa.proximo_remito;
-    console.log("numero rremito", numeroRemito);
 
     const facturaNueva = {
       fecha,
@@ -306,7 +357,7 @@ export default function Factura() {
     const numeroGenerado = data.numero;
 
     const detalleInsert = detalle.map((item) => ({
-      idfactura: numeroRemito,
+      idfactura: facturaId,
       idarticulo: item.idarticulo,
       codigo: item.codigo,
       descripcion: item.descripcion || item.articulo || "",
@@ -320,13 +371,49 @@ export default function Factura() {
       .insert(detalleInsert)
       .select();
 
-    console.log("Detalle guardado:", detalleData);
-    console.log("Error detalle:", errorDetalle);
-
     if (errorDetalle) {
       alert("Error al guardar detalle");
       return;
     }
+    //Factura Electronica
+    const responseFiscal = await fetch(
+      "http://localhost:3001/api/fiscal/autorizar",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          idFactura: facturaId,
+        }),
+      },
+    );
+
+    const respuestaFiscal = await responseFiscal.json();
+
+    if (!respuestaFiscal.ok) {
+      alert(respuestaFiscal.mensaje || respuestaFiscal.error || "Error fiscal");
+      return;
+    }
+
+    const datosPdfFiscal = {
+      empresa: respuestaFiscal.factura.empresas,
+      numeroFactura: respuestaFiscal.afip.numeroFiscal,
+      fecha: respuestaFiscal.factura.fecha,
+      tipoComprobante: respuestaFiscal.factura.tipo_comprobante,
+      letraComprobante: "C",
+      formaPago: respuestaFiscal.factura.forma_pago,
+      clienteSeleccionado,
+      detalle,
+      totalFactura: totalCalc,
+      observaciones,
+      puntoVenta: respuestaFiscal.afip.puntoVenta,
+      cae: respuestaFiscal.afip.cae,
+      vencimientoCae: respuestaFiscal.afip.caeVto,
+    };
+
+    setPdfData(datosPdfFiscal);
+    setGenerarPdfPendiente(true);
 
     await supabase
       .from("empresas")
@@ -342,7 +429,6 @@ export default function Factura() {
         cantidad: Number(item.cantidad),
       }));
 
-      // console.log("Items para descontar:", itemsStock);
       const usuarioGuardado = JSON.parse(localStorage.getItem("usuario"));
       const idEmpresa = await obtenerEmpresa(usuarioGuardado.id);
 
@@ -363,24 +449,20 @@ export default function Factura() {
 
     setNumeroFactura(numeroGenerado);
 
-    const datosPdf = {
-      numeroFactura: numeroGenerado,
+    const datosPdfRemito = {
+      numeroFactura: respuestaFiscal.afip.numeroFiscal,
       fecha,
       tipoComprobante,
-      letraComprobante,
+      letraComprobante: "C",
       formaPago,
       clienteSeleccionado,
       detalle,
       totalFactura: totalCalc,
       observaciones,
-      puntoVenta: 1,
+      puntoVenta: respuestaFiscal.afip.puntoVenta,
+      cae: respuestaFiscal.afip.cae,
+      vencimientoCae: respuestaFiscal.afip.caeVto,
     };
-
-    setPdfData(datosPdf);
-
-    setTimeout(() => {
-      generarpdfU(facturaPdfRef.current, `factura-${numeroGenerado}.pdf`);
-    }, 800);
 
     setClienteId("");
     setClienteSeleccionado(null);
@@ -831,28 +913,25 @@ export default function Factura() {
             </Typography>
           </Box>
         </Box>
-        <Button variant="contained" onClick={probarBackendFiscal}>
-          Probar Backend Fiscal
-        </Button>
       </Paper>
 
-      {pdfData && empresa && (
-        <div style={{ position: "absolute", left: "-9999px" }}>
-          <GenerarPdf
-            ref={facturaPdfRef}
-            empresa={empresa}
-            numeroFactura={pdfData.numeroFactura}
-            fecha={pdfData.fecha}
-            tipoComprobante={pdfData.tipoComprobante}
-            letraComprobante={pdfData.letraComprobante}
-            formaPago={pdfData.formaPago}
-            clienteSeleccionado={pdfData.clienteSeleccionado}
-            detalle={pdfData.detalle}
-            totalFactura={pdfData.totalFactura}
-            observaciones={pdfData.observaciones}
-            puntoVenta={pdfData.puntoVenta}
-          />
-        </div>
+      {pdfData && (
+        <GenerarPdf
+          ref={facturaPdfRef}
+          empresa={pdfData.empresa}
+          numeroFactura={pdfData.numeroFactura}
+          fecha={pdfData.fecha}
+          tipoComprobante={pdfData.tipoComprobante}
+          letraComprobante={pdfData.letraComprobante}
+          formaPago={pdfData.formaPago}
+          clienteSeleccionado={pdfData.clienteSeleccionado}
+          detalle={pdfData.detalle}
+          totalFactura={pdfData.totalFactura}
+          observaciones={pdfData.observaciones}
+          puntoVenta={pdfData.puntoVenta}
+          cae={pdfData.cae}
+          vencimientoCae={pdfData.vencimientoCae}
+        />
       )}
     </Box>
   );

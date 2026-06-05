@@ -4,6 +4,8 @@ import { useRef, useEffect, useState } from "react";
 import { generarpdfU } from "../utils/generarpdfu";
 import GenerarPdf from "../componentes/GenerarPdf";
 import { DataGrid } from "@mui/x-data-grid";
+import { Button } from "@mui/material";
+
 import { supabase } from "../hook/supabaseClient";
 import { obtenerEmpresa } from "../utils/obtenerEmpresa";
 
@@ -30,10 +32,59 @@ export default function Facturas() {
   const [facturaSeleccionada, setFacturaSeleccionada] = useState(null);
   const [openDetalle, setOpenDetalle] = useState(false);
   const [filtro, setFiltro] = useState("");
+  const [empresa, setEmpresa] = useState(null);
+  const [pdfData, setPdfData] = useState(null);
+  const [pdfNombre, setPdfNombre] = useState("");
   const facturaPdfRef = useRef();
 
+  const autorizarFacturaPendiente = async (factura) => {
+    const response = await fetch("http://localhost:3001/api/fiscal/autorizar", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        idFactura: factura.id,
+      }),
+    });
+
+    const data = await response.json();
+    const detallePdf = data.fiscal.detalle.map((item, index) => ({
+      id: index,
+      articulo: item.descripcion,
+      descripcion: item.descripcion,
+      cantidad: item.cantidad,
+      precio: item.precio,
+      subtotal: item.subtotal,
+    }));
+    console.log("Respuesta fiscal:", data);
+
+    if (!data.ok) {
+      alert(data.mensaje || data.error || "Error al autorizar factura");
+      return;
+    }
+
+    alert("Factura autorizada correctamente");
+
+    await cargarFacturas();
+  };
+
   const cargarFacturas = async () => {
-    const { data, error } = await supabase.from("facturas").select(`
+    const usuarioGuardado = JSON.parse(localStorage.getItem("usuario"));
+    if (!usuarioGuardado?.id) {
+      console.log("No hay usuario logueado");
+      return;
+    }
+    const idEmpresa = await obtenerEmpresa(usuarioGuardado.id);
+    if (!idEmpresa) {
+      console.log("No se encontró empresa para el usuario");
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("facturas")
+      .select(
+        `
       id,
       numero,
       fecha,
@@ -43,14 +94,23 @@ export default function Facturas() {
       subtotal,
       total,
       punto_venta,
+      estado_fiscal,
+      numero_fiscal,
+      cae,
+      cae_vencimiento,
       clientes (
         nombre,
         cuit,
         direccion,
         telefono,
-        idciudad
+        idciudad,
+        ciudades(nombre)
       )
-    `);
+        
+    `,
+      )
+      .eq("idempresa", idEmpresa)
+      .order("id", { ascending: false });
 
     if (error) {
       console.log("Error al cargar facturas:", error);
@@ -76,7 +136,7 @@ export default function Facturas() {
         articulos(nombre)
       `,
       )
-      .eq("idfactura", factura.id)
+      .eq("idfactura", factura.numero)
       .eq("idempresa", factura.idEmpresa);
 
     if (error) {
@@ -86,7 +146,9 @@ export default function Facturas() {
 
     const detalleFormateado = (data || []).map((item) => ({
       id: item.id,
-      articulo: item?.articulos?.nombre || "-",
+      articulo: item?.articulos?.descripcion || item.descripcion || "-",
+      descripcion: item?.articulos?.descripcion || item.descripcion || "-",
+      nombre: item?.articulos?.descripcion || item.descripcion || "-",
       cantidad: item.cantidad,
       precio: item.precio,
       subtotal: item.subtotal,
@@ -97,24 +159,33 @@ export default function Facturas() {
   };
 
   const descargarPdfFactura = async (factura) => {
-    setFacturaSeleccionada(factura);
-
     const usuarioGuardado = JSON.parse(localStorage.getItem("usuario"));
     const idEmpresa = await obtenerEmpresa(usuarioGuardado.id);
+    console.log("Factura para buscar detalle:", {
+      id: factura.id,
+      numero: factura.numero,
+      numero_fiscal: factura.numero_fiscal,
+    });
+    const { data: empresaData } = await supabase
+      .from("empresas")
+      .select("*")
+      .eq("id", idEmpresa)
+      .single();
 
     const { data, error } = await supabase
-      .from("factura_detalle")
+      .from("detalle_factura")
       .select(
         `
-        id,
-        cantidad,
-        precio,
-        subtotal,
-        articulos(nombre)
-      `,
+      id,
+      cantidad,
+      precio,
+      subtotal,
+      descripcion,
+      articulos(descripcion)
+    `,
       )
-      .eq("idfactura", factura.id)
-      .eq("idempresa", factura.idEmpresa);
+      .eq("idfactura", factura.numero)
+      .eq("idempresa", idEmpresa);
 
     if (error) {
       console.log("Error al cargar detalle para PDF:", error);
@@ -123,56 +194,76 @@ export default function Facturas() {
 
     const detalleFormateado = (data || []).map((item) => ({
       id: item.id,
-      articulo: item?.articulos?.nombre || "-",
+      articulo: item?.articulos?.descripcion || item.descripcion || "-",
       cantidad: item.cantidad,
       precio: item.precio,
       subtotal: item.subtotal,
     }));
+    console.log("Cliente PDF:", factura.clientes);
 
-    setDetalleFactura(detalleFormateado);
+    setPdfData({
+      empresa: empresaData,
+      numeroFactura: factura.numero_fiscal,
+      fecha: factura.fecha,
+      tipoComprobante: factura.tipo_comprobante,
+      letraComprobante: factura.letra_comprobante || "C",
+      formaPago: factura.forma_pago,
+      clienteSeleccionado: factura.clientes,
+      detalle: detalleFormateado,
+      totalFactura: factura.total,
+      observaciones: factura.observaciones,
+      puntoVenta: factura.punto_venta,
+      cae: factura.cae,
+      vencimientoCae: factura.cae_vencimiento,
+    });
 
-    setTimeout(() => {
-      generarpdfU(
-        facturaPdfRef.current,
-        `factura-${factura.numero || "sin-numero"}.pdf`,
-      );
-    }, 300);
+    setPdfNombre(
+      `factura-${factura.letra_comprobante || "C"}-${String(
+        factura.punto_venta || 1,
+      ).padStart(4, "0")}-${String(
+        factura.numero_fiscal || factura.numero || 0,
+      ).padStart(8, "0")}.pdf`,
+    );
   };
 
   useEffect(() => {
     cargarFacturas();
   }, []);
 
+  useEffect(() => {
+    if (!pdfData || !pdfNombre) return;
+
+    const timer = setTimeout(() => {
+      generarpdfU(facturaPdfRef.current, pdfNombre);
+      setPdfNombre("");
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, [pdfData, pdfNombre]);
+
   const columnas = [
     {
       field: "fecha",
       headerName: "Fecha",
       width: 120,
+      renderCell: (params) => {
+        if (!params.value) return "-";
+
+        const [anio, mes, dia] = params.value.split("-");
+
+        return `${dia}/${mes}/${anio}`;
+      },
     },
     {
       field: "cliente",
       headerName: "Cliente",
-      flex: 1,
-      minWidth: 180,
+      minWidth: 220,
       renderCell: (params) => params.row?.clientes?.nombre || "Sin Cliente",
-    },
-    {
-      field: "tipo_comprobante",
-      headerName: "Comprobante",
-      width: 140,
-    },
-    {
-      field: "forma_pago",
-      headerName: "Pago",
-      width: 140,
-      renderCell: (params) => (
-        <Chip label={params.value} size="small" color="primary" />
-      ),
     },
     {
       field: "total",
       headerName: "Total",
-      width: 130,
+      flex: 1,
       align: "right",
       headerAlign: "right",
       renderCell: (params) => {
@@ -182,6 +273,68 @@ export default function Facturas() {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
         })}`;
+      },
+    },
+    {
+      field: "estado_fiscal",
+      headerName: "Estado Fiscal",
+      width: 150,
+      field: "estado_fiscal",
+      headerName: "Estado Fiscal",
+      width: 150,
+      renderCell: (params) => {
+        const estado = params.value || "pendiente";
+
+        const config = {
+          autorizada: {
+            label: "Autorizada",
+            color: "success",
+          },
+          pendiente: {
+            label: "Pendiente",
+            color: "warning",
+          },
+          rechazada: {
+            label: "Rechazada",
+            color: "error",
+          },
+        };
+
+        const item = config[estado] || {
+          label: estado,
+          color: "default",
+        };
+
+        return <Chip label={item.label} color={item.color} size="small" />;
+      },
+    },
+    {
+      field: "numero_fiscal",
+      headerName: "N° Fiscal",
+      width: 160,
+      renderCell: (params) => {
+        const ptoVta = String(params.row.punto_venta || 1).padStart(4, "0");
+        const nro = String(params.value || 0).padStart(8, "0");
+        return `${ptoVta}-${nro}`;
+      },
+    },
+    {
+      field: "cae",
+      headerName: "CAE",
+      width: 160,
+      renderCell: (params) => {
+        if (params.row.estado_fiscal !== "autorizada") return "-";
+        return params.value || "-";
+      },
+    },
+    {
+      field: "cae_vencimiento",
+      headerName: "Vto. CAE",
+      width: 120,
+      renderCell: (params) => {
+        if (!params.value) return "-";
+        const fecha = new Date(params.value);
+        return fecha.toLocaleDateString("es-AR");
       },
     },
 
@@ -199,6 +352,29 @@ export default function Facturas() {
           <PictureAsPdfIcon />
         </IconButton>
       ),
+    },
+    {
+      field: "autorizar",
+      headerName: "AFIP",
+      width: 120,
+      sortable: false,
+      filterable: false,
+      renderCell: (params) => {
+        if (params.row.estado_fiscal === "autorizada") {
+          return "-";
+        }
+
+        return (
+          <Button
+            size="small"
+            variant="contained"
+            color="success"
+            onClick={() => autorizarFacturaPendiente(params.row)}
+          >
+            Autorizar
+          </Button>
+        );
+      },
     },
   ];
 
@@ -298,7 +474,13 @@ export default function Facturas() {
             <TableBody>
               {detalleFactura.map((item) => (
                 <TableRow key={item.id}>
-                  <TableCell>{item.articulo || "-"}</TableCell>
+                  <TableCell>
+                    {item.articulos?.descripcion ||
+                      item.articulo ||
+                      item.nombre ||
+                      item.descripcion ||
+                      "-"}
+                  </TableCell>
                   <TableCell align="right">{item.cantidad}</TableCell>
                   <TableCell align="right">
                     {new Intl.NumberFormat("es-AR", {
@@ -321,18 +503,24 @@ export default function Facturas() {
         </DialogContent>
       </Dialog>
 
-      <GenerarPdf
-        ref={facturaPdfRef}
-        fecha={facturaSeleccionada?.fecha}
-        tipoComprobante={facturaSeleccionada?.tipo_comprobante}
-        puntoVenta={facturaSeleccionada?.punto_venta || 1}
-        numeroFactura={facturaSeleccionada?.numero}
-        formaPago={facturaSeleccionada?.forma_pago}
-        clienteSeleccionado={facturaSeleccionada?.clientes}
-        detalle={detalleFactura}
-        totalFactura={facturaSeleccionada?.total}
-        observaciones={facturaSeleccionada?.observaciones}
-      />
+      {pdfData && (
+        <GenerarPdf
+          ref={facturaPdfRef}
+          empresa={pdfData.empresa}
+          fecha={pdfData.fecha}
+          letraComprobante={pdfData.letraComprobante}
+          tipoComprobante={pdfData.tipoComprobante}
+          puntoVenta={pdfData.puntoVenta}
+          numeroFactura={pdfData.numeroFactura}
+          formaPago={pdfData.formaPago}
+          clienteSeleccionado={pdfData.clienteSeleccionado}
+          detalle={pdfData.detalle}
+          totalFactura={pdfData.totalFactura}
+          observaciones={pdfData.observaciones}
+          cae={pdfData.cae}
+          vencimientoCae={pdfData.vencimientoCae}
+        />
+      )}
     </Box>
   );
 }

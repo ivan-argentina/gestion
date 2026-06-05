@@ -15,6 +15,7 @@ dist
 dist-ssr
 .env
 *.local
+backend/ta-wsfe.json
 backend/certificados/**/*.key
 backend/certificados/**/*.crt
 backend/certificados/**/*.csr

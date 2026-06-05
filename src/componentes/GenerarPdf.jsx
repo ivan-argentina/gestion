@@ -1,4 +1,6 @@
-import { forwardRef } from "react";
+import { forwardRef, useEffect, useState } from "react";
+
+import QRCode from "qrcode";
 import { formatearCuit } from "../utils/formatearCuit";
 import {
   Box,
@@ -49,6 +51,59 @@ const GenerarPdf = forwardRef(
       return tipo.replaceAll("_", " ").toUpperCase();
     };
 
+    const formatearFechaAfip = (fecha) => {
+      if (!fecha) return "-";
+
+      const [anio, mes, dia] = String(fecha).split("-");
+
+      return `${dia}/${mes}/${anio}`;
+    };
+
+    const [qrAfip, setQrAfip] = useState("");
+
+    useEffect(() => {
+      const generarQr = async () => {
+        if (!cae || !empresa?.cuit || !puntoVenta || !numeroFactura) return;
+
+        const datosQr = {
+          ver: 1,
+          fecha,
+          cuit: Number(String(empresa.cuit).replace(/\D/g, "")),
+          ptoVta: Number(puntoVenta),
+          tipoCmp:
+            letraComprobante === "C" ? 11 : letraComprobante === "B" ? 6 : 1,
+          nroCmp: Number(numeroFactura),
+          importe: Number(totalFactura || 0),
+          moneda: "PES",
+          ctz: 1,
+          tipoDocRec: clienteSeleccionado?.cuit ? 80 : 99,
+          nroDocRec: clienteSeleccionado?.cuit
+            ? Number(String(clienteSeleccionado.cuit).replace(/\D/g, ""))
+            : 0,
+          tipoCodAut: "E",
+          codAut: Number(cae),
+        };
+
+        const json = JSON.stringify(datosQr);
+        const base64 = btoa(json);
+        const url = `https://www.afip.gob.ar/fe/qr/?p=${base64}`;
+
+        const qr = await QRCode.toDataURL(url);
+        setQrAfip(qr);
+      };
+
+      generarQr();
+    }, [
+      cae,
+      empresa,
+      puntoVenta,
+      numeroFactura,
+      fecha,
+      letraComprobante,
+      totalFactura,
+      clienteSeleccionado,
+    ]);
+
     return (
       <Box
         sx={{
@@ -69,7 +124,6 @@ const GenerarPdf = forwardRef(
             boxShadow: "none",
             display: "flex",
             flexDirection: "column",
-            height: 1120,
           }}
         >
           <Box
@@ -166,7 +220,12 @@ const GenerarPdf = forwardRef(
                   textAlign: "center",
                 }}
               >
-                COD. 006
+                COD.{" "}
+                {letraComprobante === "C"
+                  ? "011"
+                  : letraComprobante === "B"
+                    ? "006"
+                    : "001"}
               </Typography>
             </Box>
 
@@ -301,6 +360,7 @@ const GenerarPdf = forwardRef(
                     {item.articulos?.descripcion ||
                       item.nombre ||
                       item.descripcion ||
+                      item.articulo ||
                       "-"}
                   </TableCell>
 
@@ -333,7 +393,7 @@ const GenerarPdf = forwardRef(
               display: "flex",
               border: "1.5px solid #000",
               minHeight: 130,
-              mt: "auto",
+              mt: 2,
               mb: 2,
             }}
           >
@@ -433,7 +493,8 @@ const GenerarPdf = forwardRef(
               </Typography>
 
               <Typography sx={{ fontSize: 12.5 }}>
-                <strong>Fecha de Vto. de CAE:</strong> {vencimientoCae}
+                <strong>Fecha de Vto. de CAE:</strong>{" "}
+                {formatearFechaAfip(vencimientoCae)}
               </Typography>
             </Box>
 
@@ -450,7 +511,15 @@ const GenerarPdf = forwardRef(
                 p: 1,
               }}
             >
-              QR
+              {qrAfip ? (
+                <img
+                  src={qrAfip}
+                  alt="QR AFIP"
+                  style={{ width: "100%", height: "100%" }}
+                />
+              ) : (
+                "QR"
+              )}
             </Box>
           </Box>
 
