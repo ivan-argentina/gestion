@@ -1,3 +1,6 @@
+import { useNavigate } from "react-router-dom";
+import UndoIcon from "@mui/icons-material/Undo";
+import WhatsAppIcon from "@mui/icons-material/WhatsApp";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import { useRef, useEffect, useState } from "react";
@@ -32,10 +35,16 @@ export default function Facturas() {
   const [facturaSeleccionada, setFacturaSeleccionada] = useState(null);
   const [openDetalle, setOpenDetalle] = useState(false);
   const [filtro, setFiltro] = useState("");
-  const [empresa, setEmpresa] = useState(null);
   const [pdfData, setPdfData] = useState(null);
   const [pdfNombre, setPdfNombre] = useState("");
   const facturaPdfRef = useRef();
+
+  const navigate = useNavigate();
+  const crearNotaCredito = (factura) => {
+    localStorage.setItem("notaCreditoOrigen", JSON.stringify(factura));
+
+    navigate("/factura");
+  };
 
   const autorizarFacturaPendiente = async (factura) => {
     const response = await fetch("http://localhost:3001/api/fiscal/autorizar", {
@@ -57,7 +66,6 @@ export default function Facturas() {
       precio: item.precio,
       subtotal: item.subtotal,
     }));
-    console.log("Respuesta fiscal:", data);
 
     if (!data.ok) {
       alert(data.mensaje || data.error || "Error al autorizar factura");
@@ -67,6 +75,24 @@ export default function Facturas() {
     alert("Factura autorizada correctamente");
 
     await cargarFacturas();
+  };
+
+  const enviarWhatsAppFactura = async (factura) => {
+    // Genera y descarga el PDF
+    await descargarPdfFactura(factura);
+    const telefono = factura.clientes?.telefono?.replace(/\D/g, "");
+
+    if (!telefono) {
+      alert("El cliente no tiene teléfono cargado");
+      return;
+    }
+
+    const mensaje = `Hola ${factura.clientes?.nombre}, te enviamos la factura N° ${factura.numero_fiscal}.`;
+
+    window.open(
+      `https://wa.me/54${telefono}?text=${encodeURIComponent(mensaje)}`,
+      "_blank",
+    );
   };
 
   const cargarFacturas = async () => {
@@ -85,29 +111,44 @@ export default function Facturas() {
       .from("facturas")
       .select(
         `
+    id,
+    idcliente,
+    idfactura_origen,
+     numero_origen,
+    numero,
+    fecha,
+    tipo_comprobante,
+    forma_pago,
+    observaciones,
+    subtotal,
+    total,
+    punto_venta,
+    estado_fiscal,
+    numero_fiscal,
+    cae,
+    cae_vencimiento,
+
+    clientes (
+      nombre,
+      cuit,
+      direccion,
+      telefono,
+      idciudad,
+      ciudades(nombre)
+    ),
+
+    detalle_factura (
       id,
-      numero,
-      fecha,
-      tipo_comprobante,
-      forma_pago,
-      observaciones,
+      idarticulo,
+      cantidad,
+      precio,
       subtotal,
-      total,
-      punto_venta,
-      estado_fiscal,
-      numero_fiscal,
-      cae,
-      cae_vencimiento,
-      clientes (
-        nombre,
-        cuit,
-        direccion,
-        telefono,
-        idciudad,
-        ciudades(nombre)
+      descripcion,
+      articulos (
+        descripcion
       )
-        
-    `,
+    )
+  `,
       )
       .eq("idempresa", idEmpresa)
       .order("id", { ascending: false });
@@ -161,11 +202,7 @@ export default function Facturas() {
   const descargarPdfFactura = async (factura) => {
     const usuarioGuardado = JSON.parse(localStorage.getItem("usuario"));
     const idEmpresa = await obtenerEmpresa(usuarioGuardado.id);
-    console.log("Factura para buscar detalle:", {
-      id: factura.id,
-      numero: factura.numero,
-      numero_fiscal: factura.numero_fiscal,
-    });
+
     const { data: empresaData } = await supabase
       .from("empresas")
       .select("*")
@@ -184,7 +221,7 @@ export default function Facturas() {
       articulos(descripcion)
     `,
       )
-      .eq("idfactura", factura.numero)
+      .eq("idfactura", factura.id)
       .eq("idempresa", idEmpresa);
 
     if (error) {
@@ -199,7 +236,6 @@ export default function Facturas() {
       precio: item.precio,
       subtotal: item.subtotal,
     }));
-    console.log("Cliente PDF:", factura.clientes);
 
     setPdfData({
       empresa: empresaData,
@@ -279,9 +315,6 @@ export default function Facturas() {
       field: "estado_fiscal",
       headerName: "Estado Fiscal",
       width: 150,
-      field: "estado_fiscal",
-      headerName: "Estado Fiscal",
-      width: 150,
       renderCell: (params) => {
         const estado = params.value || "pendiente";
 
@@ -340,18 +373,45 @@ export default function Facturas() {
 
     {
       field: "pdf",
-      headerName: "PDF",
-      width: 80,
+      headerName: "Acciones",
+      width: 150,
       sortable: false,
       filterable: false,
       renderCell: (params) => (
-        <IconButton
-          color="secondary"
-          onClick={() => descargarPdfFactura(params.row)}
-        >
-          <PictureAsPdfIcon />
-        </IconButton>
+        <>
+          <IconButton
+            color="secondary"
+            onClick={() => descargarPdfFactura(params.row)}
+          >
+            <PictureAsPdfIcon />
+          </IconButton>
+
+          <IconButton
+            color="success"
+            onClick={() => enviarWhatsAppFactura(params.row)}
+          >
+            <WhatsAppIcon />
+          </IconButton>
+          <IconButton
+            color="warning"
+            onClick={() => crearNotaCredito(params.row)}
+          >
+            <UndoIcon />
+          </IconButton>
+        </>
       ),
+    },
+    {
+      field: "origen",
+      headerName: "Origen",
+      width: 150,
+      renderCell: (params) => {
+        if (params.row.tipo_comprobante !== "nota_de_credito") return "-";
+
+        return params.row.idfactura_origen
+          ? `Factura ID ${params.row.idfactura_origen}`
+          : "Sin origen";
+      },
     },
     {
       field: "autorizar",

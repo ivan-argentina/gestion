@@ -54,49 +54,13 @@ export default function Factura() {
   const [generarPdfPendiente, setGenerarPdfPendiente] = useState(false);
   const [condicionIva, setCondicionIva] = useState("");
   const [ciudad, setCiudad] = useState("");
+  const [idFacturaOrigen, setIdFacturaOrigen] = useState(null);
+  const [numeroFacturaOrigen, setNumeroFacturaOrigen] = useState(null);
 
   const inputArticuloRef = useRef(null);
   const facturaPdfRef = useRef(null);
 
   const drawerWidth = 200;
-
-  const probarBackendFiscal = async () => {
-    const response = await fetch("http://localhost:3001/api/fiscal/autorizar", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        idFactura: 124,
-      }),
-    });
-
-    const data = await response.json();
-
-    if (!data.ok) {
-      alert(data.mensaje || data.error || "Error al autorizar factura");
-      return;
-    }
-
-    const datosPdf = {
-      empresa: data.factura.empresas,
-      numeroFactura: data.afip.numeroFiscal,
-      fecha: data.factura.fecha,
-      tipoComprobante: data.factura.tipo_comprobante,
-      letraComprobante: "C",
-      formaPago: data.factura.forma_pago,
-      clienteSeleccionado: data.factura.clientes,
-      detalle: data.factura.detalle_factura || [],
-      totalFactura: data.factura.total,
-      observaciones: data.factura.observaciones,
-      puntoVenta: data.afip.puntoVenta,
-      cae: data.afip.cae,
-      vencimientoCae: data.afip.caeVto,
-    };
-
-    setPdfData(datosPdf);
-    setGenerarPdfPendiente(true);
-  };
 
   useEffect(() => {
     if (!generarPdfPendiente || !pdfData) return;
@@ -248,6 +212,42 @@ export default function Factura() {
     const cli = clientes.find((c) => String(c.id) === String(id));
     setClienteSeleccionado(cli || null);
   };
+  useEffect(() => {
+    const notaOrigen = localStorage.getItem("notaCreditoOrigen");
+
+    if (!notaOrigen) return;
+    if (clientes.length === 0) return;
+
+    const factura = JSON.parse(notaOrigen);
+
+    console.log("FACTURA ORIGEN", factura);
+    console.log("ID FACTURA ORIGEN", factura.id);
+
+    setTipoComprobante("nota_de_credito");
+    setIdFacturaOrigen(factura.id);
+    manejarCliente(factura.idcliente);
+    setNumeroFacturaOrigen(factura.numero_fiscal || factura.numero);
+
+    const detalleNota = (factura.detalle_factura || []).map((item, index) => ({
+      id: item.id || index + 1,
+      idarticulo: item.idarticulo,
+      articulo: item.articulos?.descripcion || item.descripcion || "",
+      descripcion: item.articulos?.descripcion || item.descripcion || "",
+      cantidad: item.cantidad,
+      precio: item.precio,
+      subtotal: item.subtotal,
+    }));
+
+    setDetalle(detalleNota);
+
+    setObservaciones(
+      `Nota de crédito correspondiente a factura N° ${
+        factura.numero_fiscal || factura.numero
+      }`,
+    );
+
+    localStorage.removeItem("notaCreditoOrigen");
+  }, [clientes]);
 
   const agregarDetalle = () => {
     const art =
@@ -339,8 +339,13 @@ export default function Factura() {
       idempresa: idEmpresa,
       numero: numeroRemito,
       idusuario: usuarioGuardado.id,
+      idfactura_origen:
+        tipoComprobante === "nota_de_credito" ? idFacturaOrigen : null,
+      numero_origen:
+        tipoComprobante === "nota_de_credito" ? numeroFacturaOrigen : null,
     };
 
+    console.log("FACTURA NUEVA:", facturaNueva);
     const { data, error } = await supabase
       .from("facturas")
       .insert([facturaNueva])
@@ -422,8 +427,12 @@ export default function Factura() {
       })
       .eq("id", idEmpresa);
 
-    //Descuento el stock
-    if (tipoComprobante === "factura" || tipoComprobante === "remito") {
+    // Movimiento de stock
+    if (
+      tipoComprobante === "factura" ||
+      tipoComprobante === "remito" ||
+      tipoComprobante === "nota_de_credito"
+    ) {
       const itemsStock = detalle.map((item) => ({
         idarticulo: item.idarticulo,
         cantidad: Number(item.cantidad),
@@ -432,17 +441,19 @@ export default function Factura() {
       const usuarioGuardado = JSON.parse(localStorage.getItem("usuario"));
       const idEmpresa = await obtenerEmpresa(usuarioGuardado.id);
 
-      const { error: errorStock } = await supabase.rpc(
-        "descontar_stock_multiple",
-        {
-          items: itemsStock,
-          p_idempresa: idEmpresa,
-        },
-      );
+      const funcionStock =
+        tipoComprobante === "nota_de_credito"
+          ? "devolver_stock_multiple"
+          : "descontar_stock_multiple";
+
+      const { error: errorStock } = await supabase.rpc(funcionStock, {
+        items: itemsStock,
+        p_idempresa: idEmpresa,
+      });
 
       if (errorStock) {
-        console.log("Error al descontar stock:", errorStock);
-        alert("Error al descontar stock");
+        console.log("Error al mover stock:", errorStock);
+        alert("Error al actualizar stock");
         return;
       }
     }
@@ -477,6 +488,7 @@ export default function Factura() {
     setCantidad(1);
     setPrecio("");
     setDetalle([]);
+    setIdFacturaOrigen(null);
   };
 
   useEffect(() => {
@@ -639,7 +651,6 @@ export default function Factura() {
             >
               <MenuItem value="factura">Factura</MenuItem>
               <MenuItem value="nota_de_credito">Nota de crédito</MenuItem>
-              <MenuItem value="remito">Remito</MenuItem>
               <MenuItem value="presupuesto">Presupuesto</MenuItem>
             </TextField>
           </Grid>

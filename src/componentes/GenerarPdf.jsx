@@ -12,6 +12,7 @@ import {
   TableCell,
   TableHead,
   TableRow,
+  TableContainer,
 } from "@mui/material";
 
 const GenerarPdf = forwardRef(
@@ -116,6 +117,7 @@ const GenerarPdf = forwardRef(
           ref={ref}
           sx={{
             width: 820,
+            minHeight: 1120,
             p: 3,
             backgroundColor: "#fff",
             color: "#000",
@@ -387,10 +389,13 @@ const GenerarPdf = forwardRef(
               )}
             </TableBody>
           </Table>
-
+          <TableContainer />
+          <Box sx={{ flexGrow: 1 }}></Box>
           <Box
             sx={{
               display: "flex",
+              justifyContent: "space-between",
+              alignItems: "stretch",
               border: "1.5px solid #000",
               minHeight: 130,
               mt: 2,
@@ -399,7 +404,7 @@ const GenerarPdf = forwardRef(
           >
             <Box
               sx={{
-                flex: 1,
+                width: 500,
                 p: 2,
                 borderRight: "1.5px solid #000",
               }}
@@ -409,11 +414,11 @@ const GenerarPdf = forwardRef(
               </Typography>
 
               <Typography sx={{ fontSize: 12, whiteSpace: "pre-line" }}>
-                {observaciones || "Sin observaciones."}
+                {observaciones}
               </Typography>
             </Box>
 
-            <Box sx={{ width: 290 }}>
+            <Box sx={{ width: 300, p: 2, borderRight: "1.5px solid #000" }}>
               <Box
                 sx={{
                   display: "flex",
@@ -488,7 +493,7 @@ const GenerarPdf = forwardRef(
             }}
           >
             <Box>
-              <Typography sx={{ fontSize: 12.5 }}>
+              <Typography sx={{ fontSize: 15, fontWeight: 800, mb: 1 }}>
                 <strong>CAE N°:</strong> {cae}
               </Typography>
 
@@ -500,14 +505,12 @@ const GenerarPdf = forwardRef(
 
             <Box
               sx={{
-                width: 84,
-                height: 84,
+                width: 120,
+                height: 120,
                 border: "1px solid #000",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                fontSize: 10,
-                textAlign: "center",
                 p: 1,
               }}
             >
@@ -515,29 +518,15 @@ const GenerarPdf = forwardRef(
                 <img
                   src={qrAfip}
                   alt="QR AFIP"
-                  style={{ width: "100%", height: "100%" }}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "contain",
+                  }}
                 />
               ) : (
                 "QR"
               )}
-            </Box>
-          </Box>
-
-          <Box
-            sx={{
-              display: "flex",
-              justifyContent: "space-between",
-              mt: 4,
-            }}
-          >
-            <Box sx={{ width: 220, textAlign: "center" }}>
-              <Divider sx={{ borderColor: "#000", mb: 0.8 }} />
-              <Typography sx={{ fontSize: 12 }}>Firma cliente</Typography>
-            </Box>
-
-            <Box sx={{ width: 220, textAlign: "center" }}>
-              <Divider sx={{ borderColor: "#000", mb: 0.8 }} />
-              <Typography sx={{ fontSize: 12 }}>Firma responsable</Typography>
             </Box>
           </Box>
         </Paper>
