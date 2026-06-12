@@ -8,13 +8,16 @@ import {
   TextField,
   Typography,
   IconButton,
+  MenuItem,
 } from "@mui/material";
+import Chip from "@mui/material/Chip";
 import { DataGrid } from "@mui/x-data-grid";
 import { validarCuit } from "../utils/validarCuit";
 import { formatearCuit } from "../utils/formatearCuit";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import SaveIcon from "@mui/icons-material/Save";
+import { obtenerEmpresa } from "../utils/obtenerEmpresa";
 
 export default function AbmEmpresas() {
   const [empresas, setEmpresas] = useState([]);
@@ -26,6 +29,11 @@ export default function AbmEmpresas() {
   const [direccion, setDireccion] = useState("");
   const [editandoId, setEditandoId] = useState(null);
   const [errorCuit, setErrorCuit] = useState("");
+  const [condicionIva, setCondicionIva] = useState("");
+  const [categoriaMonotributo, setCategoriaMonotributo] = useState("");
+  const [idCiudad, setIdCiudad] = useState("");
+  const [ciudades, setCiudades] = useState([]);
+  const [activo, setActivo] = useState(true);
 
   const handleCuitChange = (e) => {
     const valor = e.target.value.replace(/\D/g, "");
@@ -41,6 +49,27 @@ export default function AbmEmpresas() {
       setErrorCuit("");
     }
   };
+
+  const cargarCiudades = async () => {
+    const usuarioGuardado = JSON.parse(localStorage.getItem("usuario"));
+    const idEmpresa = await obtenerEmpresa(usuarioGuardado.id);
+
+    const { data, error } = await supabase
+      .from("ciudades")
+      .select("*")
+      .eq("idempresa", idEmpresa)
+      .order("nombre");
+    console.log("CIUDADES:", data);
+    console.log("TIPO:", typeof data);
+    if (!error) {
+      setCiudades(data || []);
+    }
+  };
+
+  useEffect(() => {
+    cargarCiudades();
+  }, []);
+
   const cargarEmpresas = async () => {
     const { data, error } = await supabase
       .from("empresas")
@@ -66,7 +95,11 @@ export default function AbmEmpresas() {
     setTelefono("");
     setEmail("");
     setDireccion("");
+    setIdCiudad("");
+    setCondicionIva("");
+    setCategoriaMonotributo("");
     setEditandoId(null);
+    setActivo(true);
   };
   const guardarEmpresa = async () => {
     const payload = {
@@ -76,7 +109,12 @@ export default function AbmEmpresas() {
       telefono: telefono.trim(),
       email: email.trim(),
       direccion: direccion.trim(),
-      activo: true,
+      activo: activo,
+      telefono: telefono,
+      condicion_iva: condicionIva,
+      categoria_monotributo:
+        condicionIva === "Monotributista" ? categoriaMonotributo : null,
+      telefono: telefono,
     };
     if (!payload.razon_social) {
       alert("ingrese razon social");
@@ -109,11 +147,15 @@ export default function AbmEmpresas() {
   const editarEmpresa = (empresa) => {
     setEditandoId(empresa.id);
     setRazonSocial(empresa.razon_social || "");
-    setNombreFantacia(empresa.nombre_fantacia || "");
+    setNombreFantacia(empresa.nombre_fantasia || "");
     setCuit(empresa.cuit || "");
     setTelefono(empresa.telefono || "");
     setEmail(empresa.email || "");
     setDireccion(empresa.direccion || "");
+    setIdCiudad(empresa.idciudad || "");
+    setCondicionIva(empresa.condicion_iva || "");
+    setCategoriaMonotributo(empresa.categoria_monotributo || "");
+    setActivo(empresa.activo ?? true);
   };
 
   const eliminarEmpresa = async (id) => {
@@ -152,6 +194,22 @@ export default function AbmEmpresas() {
           </IconButton>
         </Box>
       ),
+    },
+    {
+      field: "activo",
+      headerName: "Estado",
+      width: 120,
+      renderCell: (params) => {
+        const activo = params.value;
+
+        return (
+          <Chip
+            label={activo ? "Activa" : "Inactiva"}
+            color={activo ? "success" : "error"}
+            size="small"
+          />
+        );
+      },
     },
   ];
 
@@ -193,16 +251,6 @@ export default function AbmEmpresas() {
           </Grid>
           <Grid size={{ xs: 12, md: 4 }}>
             <TextField
-              label="Email"
-              fullWidth
-              size="small"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </Grid>
-
-          <Grid>
-            <TextField
               label="Direccion"
               fullWidth
               size="small"
@@ -210,17 +258,112 @@ export default function AbmEmpresas() {
               onChange={(e) => setDireccion(e.target.value)}
             />
           </Grid>
-          <Grid size={{ xs: 12 }}>
+          <Grid size={{ xs: 12, md: 3 }}>
+            <TextField
+              select
+              label="Ciudad"
+              value={idCiudad}
+              onChange={(e) => setIdCiudad(e.target.value)}
+              fullWidth
+              size="small"
+            >
+              {Array.isArray(ciudades) &&
+                ciudades.map((c) => (
+                  <MenuItem key={c.id} value={c.id}>
+                    {c.nombre}
+                  </MenuItem>
+                ))}
+            </TextField>
+          </Grid>
+          <Grid size={{ xs: 12, md: 3 }}>
+            <TextField
+              label="Teléfono"
+              value={telefono}
+              onChange={(e) => setTelefono(e.target.value)}
+              fullWidth
+              size="small"
+            />
+          </Grid>
+
+          <Grid size={{ xs: 12, md: 4 }}>
+            <TextField
+              label="Email"
+              fullWidth
+              size="small"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </Grid>
+          <Grid size={{ xs: 12, md: 2 }}>
+            <TextField
+              select
+              label="Condición IVA"
+              value={condicionIva}
+              onChange={(e) => setCondicionIva(e.target.value)}
+              fullWidth
+              size="small"
+              slotProps={{
+                htmlInput: {
+                  inputMode: "numeric",
+                },
+              }}
+            >
+              <MenuItem value="Responsable Inscripto">
+                Responsable Inscripto
+              </MenuItem>
+              <MenuItem value="Monotributista">Monotributista</MenuItem>
+              <MenuItem value="Exento">Exento</MenuItem>
+            </TextField>
+          </Grid>
+          <Grid size={{ xs: 12, md: 1 }}>
+            {condicionIva === "Monotributista" && (
+              <TextField
+                select
+                label="Categoría"
+                value={categoriaMonotributo}
+                onChange={(e) => setCategoriaMonotributo(e.target.value)}
+                fullWidth
+                size="small"
+              >
+                {["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K"].map(
+                  (cat) => (
+                    <MenuItem key={cat} value={cat}>
+                      {cat}
+                    </MenuItem>
+                  ),
+                )}
+              </TextField>
+            )}
+          </Grid>
+          <Grid size={{ xs: 12, md: 2 }}>
+            <TextField
+              select
+              label="Estado"
+              value={String(activo)}
+              onChange={(e) => setActivo(e.target.value === "true")}
+              fullWidth
+              size="small"
+            >
+              <MenuItem value="true">Activa</MenuItem>
+              <MenuItem value="false">Inactiva</MenuItem>
+            </TextField>
+          </Grid>
+          <Grid
+            size={{ xs: 12, md: 3 }}
+            sx={{
+              display: "flex",
+              alignItems: "center",
+            }}
+          >
             <Button
               variant="contained"
               startIcon={<SaveIcon />}
               onClick={guardarEmpresa}
             >
-              {editandoId ? "Actualizar Empresa" : "Guardar Empresa"}
+              {editandoId ? "Actualizar" : "Guardar"}
             </Button>
-            <Button xs={{ ml: 1 }} onClick={limpiarFormulario}>
-              Cancelar
-            </Button>
+
+            <Button onClick={limpiarFormulario}>Cancelar</Button>
           </Grid>
         </Grid>
       </Paper>

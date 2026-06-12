@@ -73,9 +73,14 @@ export default function Factura() {
         return;
       }
 
+      const nombreComprobante =
+        pdfData.tipoComprobante === "nota_de_credito"
+          ? "nota-credito"
+          : "factura";
+
       generarpdfU(
         facturaPdfRef.current,
-        `factura-C-${String(pdfData.puntoVenta).padStart(4, "0")}-${String(
+        `${nombreComprobante}-${String(pdfData.puntoVenta).padStart(4, "0")}-${String(
           pdfData.numeroFactura,
         ).padStart(8, "0")}.pdf`,
       );
@@ -88,8 +93,13 @@ export default function Factura() {
 
   const obtenerLetraComprobante = (tipoComprobante, clienteSeleccionado) => {
     const tipo = tipoComprobante || "factura";
-    const condicionIva = clienteSeleccionado?.condicionIva || "";
+    console.log("CLIENTE:", clienteSeleccionado);
+    const condicionIva =
+      clienteSeleccionado?.condicion_iva?.descripcion ||
+      clienteSeleccionado?.condicionIva ||
+      "";
 
+    console.log("CONDICION IVA CLIENTE:", condicionIva);
     if (tipo === "remito") return "X";
     if (tipo === "presupuesto") return "X";
 
@@ -220,9 +230,6 @@ export default function Factura() {
 
     const factura = JSON.parse(notaOrigen);
 
-    console.log("FACTURA ORIGEN", factura);
-    console.log("ID FACTURA ORIGEN", factura.id);
-
     setTipoComprobante("nota_de_credito");
     setIdFacturaOrigen(factura.id);
     manejarCliente(factura.idcliente);
@@ -240,11 +247,7 @@ export default function Factura() {
 
     setDetalle(detalleNota);
 
-    setObservaciones(
-      `Nota de crédito correspondiente a factura N° ${
-        factura.numero_fiscal || factura.numero
-      }`,
-    );
+    setObservaciones("");
 
     localStorage.removeItem("notaCreditoOrigen");
   }, [clientes]);
@@ -345,7 +348,7 @@ export default function Factura() {
         tipoComprobante === "nota_de_credito" ? numeroFacturaOrigen : null,
     };
 
-    console.log("FACTURA NUEVA:", facturaNueva);
+    //console.log("FACTURA NUEVA:", facturaNueva);
     const { data, error } = await supabase
       .from("facturas")
       .insert([facturaNueva])
@@ -401,20 +404,36 @@ export default function Factura() {
       return;
     }
 
+    const letraFiscal = respuestaFiscal.factura.letra_comprobante;
+
+    const esConIva = letraFiscal === "A" || letraFiscal === "B";
+
+    const neto = esConIva ? Number((totalCalc / 1.21).toFixed(2)) : totalCalc;
+
+    const iva = esConIva ? Number((totalCalc - neto).toFixed(2)) : 0;
+
+    console.log({
+      totalCalc,
+      neto,
+      iva,
+    });
     const datosPdfFiscal = {
       empresa: respuestaFiscal.factura.empresas,
       numeroFactura: respuestaFiscal.afip.numeroFiscal,
       fecha: respuestaFiscal.factura.fecha,
       tipoComprobante: respuestaFiscal.factura.tipo_comprobante,
-      letraComprobante: "C",
+      letraComprobante: respuestaFiscal.factura.letra_comprobante,
       formaPago: respuestaFiscal.factura.forma_pago,
       clienteSeleccionado,
       detalle,
       totalFactura: totalCalc,
+      neto,
+      iva,
       observaciones,
       puntoVenta: respuestaFiscal.afip.puntoVenta,
       cae: respuestaFiscal.afip.cae,
       vencimientoCae: respuestaFiscal.afip.caeVto,
+      numeroOrigen: numeroFacturaOrigen,
     };
 
     setPdfData(datosPdfFiscal);
@@ -938,10 +957,13 @@ export default function Factura() {
           clienteSeleccionado={pdfData.clienteSeleccionado}
           detalle={pdfData.detalle}
           totalFactura={pdfData.totalFactura}
+          neto={pdfData.neto}
+          iva={pdfData.iva}
           observaciones={pdfData.observaciones}
           puntoVenta={pdfData.puntoVenta}
           cae={pdfData.cae}
           vencimientoCae={pdfData.vencimientoCae}
+          numeroOrigen={pdfData.numeroOrigen}
         />
       )}
     </Box>

@@ -11,6 +11,7 @@ import { Button } from "@mui/material";
 
 import { supabase } from "../hook/supabaseClient";
 import { obtenerEmpresa } from "../utils/obtenerEmpresa";
+import Tooltip from "@mui/material/Tooltip";
 
 import {
   Box,
@@ -37,6 +38,7 @@ export default function Facturas() {
   const [filtro, setFiltro] = useState("");
   const [pdfData, setPdfData] = useState(null);
   const [pdfNombre, setPdfNombre] = useState("");
+
   const facturaPdfRef = useRef();
 
   const navigate = useNavigate();
@@ -118,6 +120,7 @@ export default function Facturas() {
     numero,
     fecha,
     tipo_comprobante,
+    letra_comprobante,
     forma_pago,
     observaciones,
     subtotal,
@@ -127,6 +130,8 @@ export default function Facturas() {
     numero_fiscal,
     cae,
     cae_vencimiento,
+    afip_error_code,
+    afip_error_msg,
 
     clientes (
       nombre,
@@ -251,10 +256,16 @@ export default function Facturas() {
       puntoVenta: factura.punto_venta,
       cae: factura.cae,
       vencimientoCae: factura.cae_vencimiento,
+      numeroOrigen: factura.numero_origen,
     });
 
+    const nombreComprobante =
+      factura.tipoComprobante === "nota_de_credito"
+        ? "nota-credito"
+        : "factura";
+
     setPdfNombre(
-      `factura-${factura.letra_comprobante || "C"}-${String(
+      `${nombreComprobante}-${factura.letra_comprobante || "C"}-${String(
         factura.punto_venta || 1,
       ).padStart(4, "0")}-${String(
         factura.numero_fiscal || factura.numero || 0,
@@ -288,6 +299,22 @@ export default function Facturas() {
         const [anio, mes, dia] = params.value.split("-");
 
         return `${dia}/${mes}/${anio}`;
+      },
+    },
+    {
+      field: "tipo",
+      headerName: "Tipo",
+      width: 150,
+      renderCell: (params) => {
+        const tipo = params.row.tipo_comprobante || "";
+        const letra = params.row.letra_comprobante || params.row.letra || "";
+
+        if (tipo === "factura") return `Factura ${letra}`;
+        if (tipo === "nota_de_credito") return `NC ${letra}`;
+        if (tipo === "presupuesto") return "Presupuesto";
+        if (tipo === "remito") return "Remito";
+
+        return tipo;
       },
     },
     {
@@ -361,6 +388,56 @@ export default function Facturas() {
       },
     },
     {
+      field: "afip_error_code",
+      headerName: "Error AFIP",
+      width: 100,
+      renderCell: (params) => {
+        const code = params.row.afip_error_code;
+        const msg = params.row.afip_error_msg;
+        const estado = params.row.estado_fiscal;
+
+        // Factura pendiente
+        if (estado === "pendiente") {
+          return (
+            <Tooltip title="Comprobante aún no enviado a AFIP">
+              <Chip
+                label="Pend."
+                color="warning"
+                size="small"
+                variant="outlined"
+              />
+            </Tooltip>
+          );
+        }
+
+        // Factura autorizada sin errores
+        if (!code) {
+          return (
+            <Tooltip title="Comprobante autorizado correctamente por AFIP">
+              <Chip
+                label="OK"
+                color="success"
+                size="small"
+                sx={{ fontWeight: 600 }}
+              />
+            </Tooltip>
+          );
+        }
+
+        // Factura rechazada con error AFIP
+        return (
+          <Tooltip title={msg || "Error informado por AFIP"}>
+            <Chip
+              label={code}
+              color="error"
+              size="small"
+              sx={{ fontWeight: 600 }}
+            />
+          </Tooltip>
+        );
+      },
+    },
+    {
       field: "cae_vencimiento",
       headerName: "Vto. CAE",
       width: 120,
@@ -379,40 +456,36 @@ export default function Facturas() {
       filterable: false,
       renderCell: (params) => (
         <>
-          <IconButton
-            color="secondary"
-            onClick={() => descargarPdfFactura(params.row)}
-          >
-            <PictureAsPdfIcon />
-          </IconButton>
+          <Tooltip title="Descargar PDF">
+            <IconButton
+              color="secondary"
+              onClick={() => descargarPdfFactura(params.row)}
+            >
+              <PictureAsPdfIcon />
+            </IconButton>
+          </Tooltip>
 
-          <IconButton
-            color="success"
-            onClick={() => enviarWhatsAppFactura(params.row)}
-          >
-            <WhatsAppIcon />
-          </IconButton>
-          <IconButton
-            color="warning"
-            onClick={() => crearNotaCredito(params.row)}
-          >
-            <UndoIcon />
-          </IconButton>
+          <Tooltip title="Enviar por WhatsApp">
+            <IconButton
+              color="success"
+              onClick={() => enviarWhatsAppFactura(params.row)}
+            >
+              <WhatsAppIcon />
+            </IconButton>
+          </Tooltip>
+
+          <Tooltip title="Generar Nota de Credito">
+            <IconButton
+              color="warning"
+              onClick={() => crearNotaCredito(params.row)}
+            >
+              <UndoIcon />
+            </IconButton>
+          </Tooltip>
         </>
       ),
     },
-    {
-      field: "origen",
-      headerName: "Origen",
-      width: 150,
-      renderCell: (params) => {
-        if (params.row.tipo_comprobante !== "nota_de_credito") return "-";
 
-        return params.row.idfactura_origen
-          ? `Factura ID ${params.row.idfactura_origen}`
-          : "Sin origen";
-      },
-    },
     {
       field: "autorizar",
       headerName: "AFIP",
@@ -579,6 +652,7 @@ export default function Facturas() {
           observaciones={pdfData.observaciones}
           cae={pdfData.cae}
           vencimientoCae={pdfData.vencimientoCae}
+          numeroOrigen={pdfData.numeroOrigen}
         />
       )}
     </Box>

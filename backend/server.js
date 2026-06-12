@@ -1,9 +1,11 @@
+import fs from "fs";
+import forge from "node-forge";
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import { obtenerTokenSign } from "./wsaa.js";
-import { obtenerUltimoComprobante, autorizarFacturaC } from "./wsfe.js";
+import { obtenerUltimoComprobante, autorizarFactura } from "./wsfe.js";
 import soap from "soap";
 
 dotenv.config();
@@ -36,14 +38,18 @@ const prepararFacturaFiscal = (factura) => {
       cuit: cliente.cuit,
       condicionIva: cliente.idciva,
     },
-
     comprobante: {
       idFactura: factura.id,
-      tipo: factura.tipo_comprobante,
+      tipo_comprobante: factura.tipo_comprobante,
+
+      idfactura_origen: factura.idfactura_origen,
+      numero_origen: factura.numero_origen,
+
       letra:
         empresa.condicion_iva === "Responsable Monotributo"
           ? "C"
           : factura.letra_comprobante,
+
       fecha: factura.fecha,
       total: Number(factura.total || 0),
       subtotal: Number(factura.subtotal || 0),
@@ -150,8 +156,15 @@ app.post("/api/fiscal/autorizar", async (req, res) => {
       ? String(fiscal.cliente.cuit).replace(/\D/g, "")
       : "";
 
-    const docTipo = 99;
-    const docNro = 0;
+    let docTipo = 99;
+    let docNro = 0;
+
+    if (fiscal.comprobante.letra === "A" || fiscal.comprobante.letra === "B") {
+      if (cuitCliente && cuitCliente.length === 11) {
+        docTipo = 80; // CUIT
+        docNro = Number(cuitCliente);
+      }
+    }
 
     console.log("Datos para AFIP:", {
       cuitEmpresa,
@@ -159,22 +172,59 @@ app.post("/api/fiscal/autorizar", async (req, res) => {
       total,
       docTipo,
       docNro,
+      tipoComprobante: fiscal.comprobante.tipo_comprobante,
     });
+    console.log("CONDICION IVA:", fiscal.empresa.condicionIva);
+    console.log("LETRA:", fiscal.comprobante.letra);
+    console.log("TIPO:", fiscal.comprobante.tipo_comprobante);
 
-    const resultadoAfip = await autorizarFacturaC({
+    const resultadoAfip = await autorizarFactura({
       cuit: cuitEmpresa,
       puntoVenta,
       total,
       docTipo,
       docNro,
+      tipoComprobante: fiscal.comprobante.tipo_comprobante,
+      letraComprobante: fiscal.comprobante.letra,
+      comprobanteAsociadoTipo:
+        fiscal.comprobante.letra === "A"
+          ? 1
+          : fiscal.comprobante.letra === "B"
+            ? 6
+            : 11,
+      comprobanteAsociadoPtoVta: puntoVenta,
+      comprobanteAsociadoNumero: fiscal.comprobante.numero_origen,
     });
 
     const detalleAfip = resultadoAfip?.FeDetResp?.FECAEDetResponse?.[0];
 
+    const tipoComprobante = fiscal.comprobante.tipo_comprobante;
+    const letraComprobante = fiscal.comprobante.letra;
+
     if (!detalleAfip || detalleAfip.Resultado !== "A") {
+      const obs = detalleAfip?.Observaciones?.Obs || [];
+
+      const primerError = Array.isArray(obs) ? obs[0] : obs;
+
+      const afipErrorCode = primerError?.Code ? String(primerError.Code) : "";
+      const afipErrorMsg = primerError?.Msg || "AFIP rechazó el comprobante";
+
+      await supabase
+        .from("facturas")
+        .update({
+          estado_fiscal: "rechazada",
+          afip_error_code: afipErrorCode,
+          afip_error_msg: afipErrorMsg,
+        })
+        .eq("id", idFactura);
+
       return res.status(400).json({
         ok: false,
         mensaje: "AFIP rechazó la factura",
+        errorAfip: {
+          code: afipErrorCode,
+          msg: afipErrorMsg,
+        },
         resultadoAfip,
       });
     }
@@ -191,7 +241,7 @@ app.post("/api/fiscal/autorizar", async (req, res) => {
         numero_fiscal: numeroFiscal,
         punto_venta: puntoVenta,
         estado_fiscal: "autorizada",
-        letra_comprobante: "C",
+        letra_comprobante: fiscal.comprobante.letra,
       })
       .eq("id", idFactura);
 
@@ -242,6 +292,41 @@ app.get("/api/fiscal/condiciones-iva", async (req, res) => {
     });
 
     res.json(result);
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error.message,
+    });
+  }
+});
+app.get("/api/fiscal/certificado/estado", (req, res) => {
+  try {
+    const certPath = "./certificados/empresa-prueba/certificado.crt";
+
+    const certPem = fs.readFileSync(certPath, "utf8");
+    const cert = forge.pki.certificateFromPem(certPem);
+
+    const vence = cert.validity.notAfter;
+    const hoy = new Date();
+
+    const diasRestantes = Math.ceil(
+      (vence.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24),
+    );
+
+    let estado = "vigente";
+
+    if (diasRestantes <= 0) {
+      estado = "vencido";
+    } else if (diasRestantes <= 30) {
+      estado = "por_vencer";
+    }
+
+    res.json({
+      ok: true,
+      estado,
+      vence,
+      diasRestantes,
+    });
   } catch (error) {
     res.status(500).json({
       ok: false,

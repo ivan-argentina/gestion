@@ -25,6 +25,7 @@ import { useNavigate } from "react-router-dom";
 import { obtenerEmpresa } from "../utils/obtenerEmpresa";
 import AbmEmpresas from "./AbmEmpresas";
 import AbmUsuarios from "./AbmUsuarios";
+import Dashboard from "./Dashboard";
 import { supabase } from "../hook/supabaseClient";
 
 const drawerWidth = 200;
@@ -510,6 +511,7 @@ export default function InicioFactu() {
             <Route path="/compra" element={<Compra />} />
             <Route path="/empresas" element={<AbmEmpresas />} />
             <Route path="/usuarios" element={<AbmUsuarios />} />
+            <Route path="/dashboard" element={<Dashboard />} />
           </Routes>
         </Box>
       </Box>
